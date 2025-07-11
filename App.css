@@ -1,0 +1,24 @@
+.app-container {
+  display: flex;
+  min-height: 100vh;
+  position: relative;
+}
+
+.sidebar {
+  width: 280px;
+  /* The gradient and other styles are already in index.css,
+     this just ensures the width is set. */
+}
+
+.main-content {
+  flex: 1;
+  margin-left: 280px;
+  padding: 30px; /* Add padding directly to the main content area */
+  transition: margin-left 0.3s ease;
+}
+
+.content-container {
+    padding: 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
