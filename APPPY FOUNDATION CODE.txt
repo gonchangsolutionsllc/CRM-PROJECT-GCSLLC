@@ -1,0 +1,158 @@
+import os
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
+from datetime import date, timedelta
+
+app = Flask(__name__)
+CORS(app)
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'crm.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+class Customer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    fullName = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), nullable=False)
+    phone = db.Column(db.String(20), nullable=False)
+    requests = db.relationship('Request', backref='customer', lazy=True)
+    quotes = db.relationship('Quote', backref='customer', lazy=True)
+    jobs = db.relationship('Job', backref='customer', lazy=True)
+    def to_dict(self): return {'id': self.id, 'fullName': self.fullName, 'email': self.email, 'phone': self.phone}
+
+class Job(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    serviceType = db.Column(db.String(100), nullable=False)
+    serviceDate = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(50), default='Scheduled', nullable=False)
+    amount = db.Column(db.Float)
+    customerId = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    def to_dict(self): return {'id': self.id, 'serviceType': self.serviceType, 'serviceDate': self.serviceDate, 'status': self.status, 'amount': self.amount, 'customerName': self.customer.fullName}
+
+class Request(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    status = db.Column(db.String(50), default='New', nullable=False)
+    customerId = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    def to_dict(self): return {'id': self.id, 'title': self.title, 'status': self.status, 'customerId': self.customerId, 'customerName': self.customer.fullName}
+
+class Quote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float)
+    status = db.Column(db.String(50), default='Draft', nullable=False)
+    customerId = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    def to_dict(self): return {'id': self.id, 'title': self.title, 'amount': self.amount, 'status': self.status, 'customerName': self.customer.fullName}
+
+@app.route('/api/dashboard-stats', methods=['GET'])
+def get_dashboard_stats(): return jsonify({})
+
+@app.route('/api/today-appointments', methods=['GET'])
+def get_today_appointments(): return jsonify({"stats": {}, "jobs": []})
+
+@app.route('/api/business-performance', methods=['GET'])
+def get_business_performance(): return jsonify({})
+
+@app.route('/api/customers', methods=['GET', 'POST', 'OPTIONS'])
+def handle_customers():
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    if request.method == 'POST':
+        data = request.get_json(); new = Customer(fullName=data['fullName'], email=data['email'], phone=data['phone']); db.session.add(new); db.session.commit(); return jsonify(new.to_dict()), 201
+    return jsonify([c.to_dict() for c in Customer.query.all()])
+
+@app.route('/api/customers/<int:id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def handle_customer(id):
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    customer = Customer.query.get_or_404(id)
+    if request.method == 'PUT':
+        data = request.get_json(); customer.fullName, customer.email, customer.phone = data['fullName'], data['email'], data['phone']; db.session.commit(); return jsonify(customer.to_dict())
+    elif request.method == 'DELETE':
+        db.session.delete(customer); db.session.commit(); return jsonify({'message': 'deleted'})
+
+@app.route('/api/jobs', methods=['GET', 'POST', 'OPTIONS'])
+def handle_jobs():
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    if request.method == 'POST':
+        data = request.get_json(); new = Job(**data); db.session.add(new); db.session.commit(); return jsonify(new.to_dict()), 201
+    return jsonify([j.to_dict() for j in Job.query.all()])
+
+@app.route('/api/requests', methods=['GET', 'POST', 'OPTIONS'])
+def handle_requests():
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    if request.method == 'POST':
+        data = request.get_json(); new = Request(**data); db.session.add(new); db.session.commit(); return jsonify(new.to_dict()), 201
+    return jsonify([r.to_dict() for r in Request.query.all()])
+
+@app.route('/api/requests/<int:id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def handle_request(id):
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    req = Request.query.get_or_404(id)
+    if request.method == 'PUT':
+        data = request.get_json(); req.title, req.status = data.get('title', req.title), data.get('status', req.status); db.session.commit(); return jsonify(req.to_dict())
+    elif request.method == 'DELETE':
+        db.session.delete(req); db.session.commit(); return jsonify({'message': 'Request deleted successfully'})
+
+@app.route('/api/requests/<int:request_id>/convert-to-quote', methods=['POST', 'OPTIONS'])
+def convert_request_to_quote(request_id):
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    req = Request.query.get_or_404(request_id)
+    new_quote = Quote(title=req.title, amount=0, status='Draft', customerId=req.customerId)
+    req.status = 'Converted to Quote'; db.session.add(new_quote); db.session.commit()
+    return jsonify(new_quote.to_dict()), 201
+
+@app.route('/api/quotes', methods=['GET', 'POST', 'OPTIONS'])
+def handle_quotes():
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    if request.method == 'POST':
+        data = request.get_json(); new = Quote(**data); db.session.add(new); db.session.commit(); return jsonify(new.to_dict()), 201
+    return jsonify([q.to_dict() for q in Quote.query.all()])
+
+# --- THIS IS THE ONLY NEW CODE ADDED ---
+@app.route('/api/quotes/<int:id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def handle_quote(id):
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    quote = Quote.query.get_or_404(id)
+    if request.method == 'PUT':
+        data = request.get_json()
+        quote.title = data.get('title', quote.title)
+        quote.amount = data.get('amount', quote.amount)
+        quote.status = data.get('status', quote.status)
+        db.session.commit()
+        return jsonify(quote.to_dict())
+    elif request.method == 'DELETE':
+        db.session.delete(quote)
+        db.session.commit()
+        return jsonify({'message': 'Quote deleted successfully'})
+
+@app.route('/api/quotes/<int:quote_id>/convert-to-job', methods=['POST', 'OPTIONS'])
+def convert_quote_to_job(quote_id):
+    if request.method == 'OPTIONS': return jsonify(status='ok')
+    quote = Quote.query.get_or_404(quote_id)
+    new_job = Job(
+        serviceType=quote.title,
+        serviceDate=date.today().strftime('%Y-%m-%d'),
+        status='Scheduled',
+        amount=quote.amount,
+        customerId=quote.customerId
+    )
+    quote.status = 'Converted'
+    db.session.add(new_job)
+    db.session.commit()
+    return jsonify(new_job.to_dict()), 201
+# --- END OF NEW CODE ---
+
+@app.route('/api/<path:path>', methods=['GET'])
+def catch_all(path): return jsonify([])
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.drop_all(); db.create_all()
+        cust1 = Customer(fullName='John Doe', email='john.doe@example.com', phone='555-0101')
+        cust2 = Customer(fullName='Jane Smith', email='jane.smith@example.com', phone='555-0102')
+        db.session.add_all([cust1, cust2]); db.session.commit()
+        req1 = Request(title='Leaky faucet inquiry', customerId=cust1.id); db.session.add(req1); db.session.commit()
+        quote1 = Quote(title='Kitchen Remodel Estimate', amount=5200.00, customerId=cust2.id, status='Approved'); db.session.add(quote1); db.session.commit()
+        job1 = Job(serviceType='Standard Cleaning', serviceDate=date.today().strftime('%Y-%m-%d'), customerId=cust1.id, amount=150.00); db.session.add(job1); db.session.commit()
+        print("Database initialized with sample data.")
+    app.run(debug=True, port=5001)
